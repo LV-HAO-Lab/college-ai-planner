@@ -2,48 +2,72 @@ import pandas as pd
 from datetime import datetime
 from openai import OpenAI
 import streamlit as st
+import os
 
 # -------------------------- 配置区 --------------------------
-DEEPSEEK_API_KEY = "sk-d5f62f99288b41a580fe7cdaa4640c5b"
+# 这里不再写死你的真实密钥！绝对安全
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 
-# 校园数据
-campus_data = {
-    "食堂": ["一食堂三楼麻辣烫人少好吃", "二食堂二楼自选菜性价比高", "三食堂早餐丰富"],
-    "自习室": ["图书馆3楼安静刷题", "教学楼B栋101空课多", "实训楼5楼机房人少"],
-    "周末出行": ["附近公园散步", "大学城商业街逛街", "市博物馆免费放松"]
+# -------------------------- 校园美食分类（不分食堂，按类型推荐） --------------------------
+food_recommend = {
+    "主食": [
+        "二楼食堂自选菜性价比高，菜品多、打饭快",
+        "一楼食堂江湖麻辣烫/拌味道好",
+        "一楼食堂椒太浪油麻鸡米饭,小菜面筋烤辣椒美味🤤",
+        "二楼食堂港式滑蛋饭，吃了都说好",
+        "三楼食堂瓦香鸡米饭，汁水特别足"
+    ],
+    "快餐": [
+        "强推食堂一楼临榆炸鸡腿，解馋神器",
+        "餐厅负一楼0090汉堡工厂，性价比首选",
+        "食堂一楼塔斯汀.汉堡，月初直接冲"
+    ],
+    "饮品": [
+        "食堂一楼幸运咖，二楼雪王，性价比之选",
+        "校内还有库迪咖啡，琉璃净茶饮"
+    ],
+    "早餐": [
+        "一楼食堂有包子，牛肉卷饼，掉渣饼等等早八严选",
+        "也有花样饼母鸡汤，牛肉胡辣汤等悠闲早餐"
+    ]
 }
 
+# 自习室、周末出行不变
+campus_study = [
+    "图书馆周一到周日：7：30 - 22：00（注：周四从中文12点开始闭馆）📖", "教三楼无上课需求的空教室都可以用来自习🧑‍🎓", "部分实验室也可以在参加社团后用来自习使用💻"
+]
+campus_travel = [
+    "附近有正弘城，360商圈🏬", "学校出门500米是地铁站🚇，可以到达郑州绝大多数游玩地方", "河南省博物馆免费预约参观🏛️"
+]
 
-# 课表数据
-def get_demo_schedule():
-    data = {
-        "课程名": [
-            "高等数学A2", "高等数学A2", "大学英语视听说A2",
-            "大学物理B", "大学体育2", "大学英语视听说A2", "实验",
-            "线性代数与空间解析几何", "线性代数与空间解析几何", "高等数学A2",
-            "大学物理B", "人工智能概论", "劳动教育"
-        ],
-        "星期": [0, 1, 1, 0, 0, 1, 1, 0, 2, 3, 3, 3, 4],
-        "开始节数": [1, 1, 1, 3, 3, 3, 3, 5, 5, 5, 7, 9, 9],
-        "结束节数": [2, 2, 2, 4, 4, 4, 4, 6, 6, 6, 8, 10, 10],
-        "地点": [
-            "教三楼201", "教三楼208", "教一楼203",
-            "教三楼209", "操场", "教一楼301", "1004",
-            "教三楼509", "教三楼509", "教三楼109",
-            "教三楼301", "教三楼104", "待定"
-        ]
-    }
-    return pd.DataFrame(data)
+
+# -------------------------- 文件读写（按学号分文件） --------------------------
+def get_student_csv_path(stu_id):
+    return f"schedule_{stu_id}.csv"
+
+
+def load_student_schedule(stu_id):
+    path = get_student_csv_path(stu_id)
+    if os.path.exists(path):
+        return pd.read_csv(path)
+    else:
+        return pd.DataFrame(columns=["课程名", "星期", "开始节数", "结束节数", "地点"])
+
+
+def save_student_schedule(stu_id, df):
+    path = get_student_csv_path(stu_id)
+    df.to_csv(path, index=False)
 
 
 # -------------------------- 功能函数 --------------------------
-def generate_plan_by_weekday(weekday_idx):
-    df = get_demo_schedule()
-    today_classes = df[df["星期"] == weekday_idx].copy()
+def generate_plan_by_weekday(weekday_idx, schedule_df):
+    if schedule_df.empty:
+        return None, "⚠️ 你还没有录入课表，请先去录入！"
+
+    today_classes = schedule_df[schedule_df["星期"] == weekday_idx].copy()
     if today_classes.empty:
-        return None, "🎉 这天没课！好好休息或复习~"
-    # 整理表格格式
+        return None, "✅ 这天没课！好好休息或复习~"
+
     today_classes["节次"] = today_classes.apply(
         lambda x: f"{x['开始节数']}-{x['结束节数']}节", axis=1
     )
@@ -51,21 +75,9 @@ def generate_plan_by_weekday(weekday_idx):
     return display_df, None
 
 
-def scene_recommend(user_input):
-    user_input = user_input.lower()
-    if any(w in user_input for w in ["食堂", "吃饭", "餐厅"]):
-        return "🍚 食堂推荐：\n" + "\n".join([f"- {x}" for x in campus_data["食堂"]])
-    elif any(w in user_input for w in ["自习室", "自习", "学习", "图书馆"]):
-        return "📖 自习室推荐：\n" + "\n".join([f"- {x}" for x in campus_data["自习室"]])
-    elif any(w in user_input for w in ["周末", "出行", "玩", "放松"]):
-        return "🚶 周末推荐：\n" + "\n".join([f"- {x}" for x in campus_data["周末出行"]])
-    else:
-        return "💡 输入关键词：食堂 / 自习室 / 周末"
-
-
-def emotion_support_chat(user_input):
+def emotion_support_chat(user_input, api_key):
     try:
-        client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
+        client = OpenAI(api_key=api_key, base_url=DEEPSEEK_BASE_URL)
         response = client.chat.completions.create(
             model="deepseek-chat",
             messages=[
@@ -77,17 +89,16 @@ def emotion_support_chat(user_input):
         )
         return response.choices[0].message.content
     except Exception as e:
-        return f"⚠️ 调用失败：{str(e)}"
+        return f"❌ 调用失败：{str(e)}"
 
 
-# -------------------------- 美化界面 --------------------------
+# -------------------------- 页面美化 --------------------------
 st.set_page_config(
-    page_title="校享·大学生AI规划师",
-    page_icon="📚",
+    page_title="郑州轻工·大学生AI规划师",
+    page_icon="🎓",
     layout="wide"
 )
 
-# 标题与样式
 st.markdown("""
 <style>
 .main-title {
@@ -106,24 +117,91 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<div class="main-title">📚 校享·大学生AI规划师</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-title">🎓 校享·大学生AI规划师</div>', unsafe_allow_html=True)
 st.divider()
 
-# 功能选择
+# ===================== 让用户输入自己的 API Key =====================
+st.subheader("🔑 AI聊天配置（仅AI功能需要）")
+api_key_input = st.text_input("请输入你的 DeepSeek API Key", type="password", placeholder="sk-xxxxxxxxxxxxxxxxxxxx")
+st.caption("课表、美食推荐功能无需API Key，可直接使用")
+
+st.divider()
+
+# ===================== 学号登录模块 =====================
+if "login_stu_id" not in st.session_state:
+    st.session_state.login_stu_id = ""
+
+st.subheader("👤 学号登录")
+stu_id_input = st.text_input("请输入你的学号登录", placeholder="例如：542513390124")
+
+if st.button("登录"):
+    if stu_id_input.strip():
+        st.session_state.login_stu_id = stu_id_input.strip()
+        st.session_state.my_schedule = load_student_schedule(st.session_state.login_stu_id)
+        st.success(f"✅ 学号 {st.session_state.login_stu_id} 登录成功，已加载你的课表！")
+    else:
+        st.warning("请输入学号！")
+
+if not st.session_state.login_stu_id:
+    st.info("请先输入学号登录后，再使用课表录入和查询功能")
+    st.stop()
+
+# ===================== 手动录入自己的课表（按学号保存） =====================
+st.subheader("📝 手动录入我的课表")
+with st.expander("点击展开录入课表", expanded=False):
+    col1, col2 = st.columns(2)
+    with col1:
+        course_name = st.text_input("课程名称")
+        weekday = st.selectbox("星期", ["周一", "周二", "周三", "周四", "周五"])
+        location = st.text_input("上课地点")
+    with col2:
+        start = st.number_input("开始节数", min_value=1, max_value=10, value=1)
+        end = st.number_input("结束节数", min_value=1, max_value=10, value=2)
+
+    week_map = {"周一": 0, "周二": 1, "周三": 2, "周四": 3, "周五": 4}
+
+    if st.button("✅ 添加这门课"):
+        if course_name and location:
+            new_row = {
+                "课程名": course_name,
+                "星期": week_map[weekday],
+                "开始节数": start,
+                "结束节数": end,
+                "地点": location
+            }
+            st.session_state.my_schedule = pd.concat(
+                [st.session_state.my_schedule, pd.DataFrame([new_row])],
+                ignore_index=True
+            )
+            save_student_schedule(st.session_state.login_stu_id, st.session_state.my_schedule)
+            st.success("添加成功！已自动保存到你的学号账号～")
+        else:
+            st.warning("课程名和地点不能为空！")
+
+    if not st.session_state.my_schedule.empty:
+        st.markdown("### 📋 我的已录入课表")
+        st.dataframe(st.session_state.my_schedule, use_container_width=True, hide_index=True)
+
+    if st.button("🗑️ 清空我的所有课表"):
+        st.session_state.my_schedule = pd.DataFrame(columns=["课程名", "星期", "开始节数", "结束节数", "地点"])
+        save_student_schedule(st.session_state.login_stu_id, st.session_state.my_schedule)
+        st.success("已清空并保存！")
+
+# ===================== 功能菜单 =====================
 menu = st.radio(
     "选择功能模块",
-    ["📅 课表查询", "🍚 校园生活推荐", "💬 AI情绪聊天"],
+    ["📅 课表查询", "🏫 校园生活推荐", "💬 AI情绪聊天"],
     horizontal=True
 )
 
 if menu == "📅 课表查询":
-    st.subheader("🗓 查看任意一天的课程安排")
+    st.subheader("📅 查看我的课程安排")
     week_map = {"周一": 0, "周二": 1, "周三": 2, "周四": 3, "周五": 4}
     selected_day = st.selectbox("选择星期", list(week_map.keys()))
     idx = week_map[selected_day]
 
-    df, empty_msg = generate_plan_by_weekday(idx)
-    st.markdown(f"### 📅 {selected_day} 课程表")
+    df, empty_msg = generate_plan_by_weekday(idx, st.session_state.my_schedule)
+    st.markdown(f"### 📌 {selected_day} 我的课程表")
     if df is not None:
         st.dataframe(
             df,
@@ -139,23 +217,44 @@ if menu == "📅 课表查询":
     else:
         st.info(empty_msg)
 
-elif menu == "🍚 校园生活推荐":
-    st.subheader("🔍 校园场景智能推荐")
+elif menu == "🏫 校园生活推荐":
+    st.subheader("🏫 校园智能推荐")
     with st.container():
         st.markdown('<div class="card">', unsafe_allow_html=True)
-        txt = st.text_input("输入需求关键词（例：食堂/自习室/周末）")
-        if txt:
-            st.text_area("推荐结果", scene_recommend(txt), height=180)
+
+        # 第一步：选择大类
+        type_choice = st.radio("选择推荐类型", ["食堂美食", "自习室", "周末出行"], horizontal=True)
+
+        if type_choice == "食堂美食":
+            # 直接选美食类型，不分食堂
+            food_type = st.selectbox("选择美食类型", list(food_recommend.keys()))
+            st.markdown("### 🍽️ 美食推荐")
+            for item in food_recommend[food_type]:
+                st.write(f"- {item}")
+
+        elif type_choice == "自习室":
+            st.markdown("### 📚 自习室推荐")
+            for item in campus_study:
+                st.write(f"- {item}")
+
+        elif type_choice == "周末出行":
+            st.markdown("### 🎉 周末出行推荐")
+            for item in campus_travel:
+                st.write(f"- {item}")
+
         st.markdown('</div>', unsafe_allow_html=True)
 
 elif menu == "💬 AI情绪聊天":
-    st.subheader("🤗 和AI聊聊学习与心情")
+    st.subheader("💬 和AI聊聊学习与心情")
     with st.container():
         st.markdown('<div class="card">', unsafe_allow_html=True)
         msg = st.text_input("说点什么吧~")
         if msg:
-            st.info(emotion_support_chat(msg))
+            if not api_key_input:
+                st.warning("请先在顶部输入你的 DeepSeek API Key")
+            else:
+                st.info(emotion_support_chat(msg, api_key_input))
         st.markdown('</div>', unsafe_allow_html=True)
 
 st.divider()
-st.caption("💡 提示：本工具仅为学习辅助，所有安排请以学校通知为准")
+st.caption("⚠️ 提示：本工具仅为学习辅助，所有安排请以学校通知为准")
