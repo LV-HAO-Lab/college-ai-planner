@@ -5,7 +5,6 @@ import streamlit as st
 import os
 
 # -------------------------- 配置区 --------------------------
-# 这里不再写死你的真实密钥！绝对安全
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 
 # -------------------------- 校园美食分类（不分食堂，按类型推荐） --------------------------
@@ -34,10 +33,14 @@ food_recommend = {
 
 # 自习室、周末出行不变
 campus_study = [
-    "图书馆周一到周日：7：30 - 22：00（注：周四从中文12点开始闭馆）📖", "教三楼无上课需求的空教室都可以用来自习🧑‍🎓", "部分实验室也可以在参加社团后用来自习使用💻"
+    "图书馆周一到周日：7：30 - 22：00（注：周四从中午12点开始闭馆）📖",
+    "教三楼无上课需求的空教室都可以用来自习🧑‍🎓",
+    "部分实验室也可以在参加社团后用来自习使用💻"
 ]
 campus_travel = [
-    "附近有正弘城，360商圈🏬", "学校出门500米是地铁站🚇，可以到达郑州绝大多数游玩地方", "河南省博物馆免费预约参观🏛️"
+    "附近有正弘城，360商圈🏬",
+    "学校出门500米是地铁站🚇，可以到达郑州绝大多数游玩地方",
+    "河南省博物馆免费预约参观🏛️"
 ]
 
 
@@ -75,17 +78,25 @@ def generate_plan_by_weekday(weekday_idx, schedule_df):
     return display_df, None
 
 
-def emotion_support_chat(user_input, api_key):
+# ===================== AI 三角色对话 =====================
+def ai_chat(user_input, api_key, role):
+    if role == "缓解情绪压力师":
+        system_prompt = "你是一位温柔、耐心、温暖的情绪疏导师，专门安慰大学生，缓解压力、焦虑、emo、不开心，语气亲切治愈、像朋友一样陪伴开导。"
+    elif role == "资料查找大师":
+        system_prompt = "你是专业资料查找大师，回答简洁准确，帮大学生查学习资料、知识点、常识、课程信息、各类文字查询，直接给出清晰答案。"
+    elif role == "解题大师":
+        system_prompt = "你是专业解题大师，专门给大学生解答各科题目：数学、物理、英语、专业课等。一定要一步步详细拆解步骤，讲清思路、公式、知识点、易错点，通俗易懂。"
+
     try:
         client = OpenAI(api_key=api_key, base_url=DEEPSEEK_BASE_URL)
         response = client.chat.completions.create(
             model="deepseek-chat",
             messages=[
-                {"role": "system", "content": "你是温柔的大学生AI规划师，简短亲切、鼓励像朋友"},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_input}
             ],
             temperature=0.7,
-            max_tokens=512
+            max_tokens=800
         )
         return response.choices[0].message.content
     except Exception as e:
@@ -117,34 +128,37 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<div class="main-title">🎓 校享·大学生AI规划师</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-title">🎓 郑州轻工·大学生AI规划师</div>', unsafe_allow_html=True)
 st.divider()
 
 # ===================== 让用户输入自己的 API Key =====================
-st.subheader("🔑 AI聊天配置（仅AI功能需要）")
+st.subheader("🔑 AI聊天配置")
 api_key_input = st.text_input("请输入你的 DeepSeek API Key", type="password", placeholder="sk-xxxxxxxxxxxxxxxxxxxx")
 st.caption("课表、美食推荐功能无需API Key，可直接使用")
 
 st.divider()
 
-# ===================== 学号登录模块 =====================
+# ===================== 学号登录模块（登录后自动隐藏） =====================
 if "login_stu_id" not in st.session_state:
     st.session_state.login_stu_id = ""
 
-st.subheader("👤 学号登录")
-stu_id_input = st.text_input("请输入你的学号登录", placeholder="例如：542513390124")
-
-if st.button("登录"):
-    if stu_id_input.strip():
-        st.session_state.login_stu_id = stu_id_input.strip()
-        st.session_state.my_schedule = load_student_schedule(st.session_state.login_stu_id)
-        st.success(f"✅ 学号 {st.session_state.login_stu_id} 登录成功，已加载你的课表！")
-    else:
-        st.warning("请输入学号！")
-
+# 未登录状态：只显示登录框
 if not st.session_state.login_stu_id:
-    st.info("请先输入学号登录后，再使用课表录入和查询功能")
-    st.stop()
+    st.subheader("👤 学号登录")
+    stu_id_input = st.text_input("请输入你的学号登录", placeholder="例如：542513390124")
+
+    if st.button("登录"):
+        if stu_id_input.strip():
+            st.session_state.login_stu_id = stu_id_input.strip()
+            st.session_state.my_schedule = load_student_schedule(st.session_state.login_stu_id)
+            st.success(f"✅ 学号 {st.session_state.login_stu_id} 登录成功！")
+            st.rerun()  # 关键：登录后刷新页面，自动隐藏登录框
+        else:
+            st.warning("请输入学号！")
+    st.stop()  # 没登录就停在这里，不显示后面的功能区
+
+# 已登录状态：不再显示登录框，直接显示主功能
+st.subheader(f"👋 欢迎你，学号 {st.session_state.login_stu_id}！")
 
 # ===================== 手动录入自己的课表（按学号保存） =====================
 st.subheader("📝 手动录入我的课表")
@@ -190,7 +204,7 @@ with st.expander("点击展开录入课表", expanded=False):
 # ===================== 功能菜单 =====================
 menu = st.radio(
     "选择功能模块",
-    ["📅 课表查询", "🏫 校园生活推荐", "💬 AI情绪聊天"],
+    ["📅 课表查询", "🏫 校园生活推荐", "💬 AI智能助手"],
     horizontal=True
 )
 
@@ -222,11 +236,9 @@ elif menu == "🏫 校园生活推荐":
     with st.container():
         st.markdown('<div class="card">', unsafe_allow_html=True)
 
-        # 第一步：选择大类
         type_choice = st.radio("选择推荐类型", ["食堂美食", "自习室", "周末出行"], horizontal=True)
 
         if type_choice == "食堂美食":
-            # 直接选美食类型，不分食堂
             food_type = st.selectbox("选择美食类型", list(food_recommend.keys()))
             st.markdown("### 🍽️ 美食推荐")
             for item in food_recommend[food_type]:
@@ -244,16 +256,29 @@ elif menu == "🏫 校园生活推荐":
 
         st.markdown('</div>', unsafe_allow_html=True)
 
-elif menu == "💬 AI情绪聊天":
-    st.subheader("💬 和AI聊聊学习与心情")
+elif menu == "💬 AI智能助手":
+    st.subheader("💬 AI 智能助手")
     with st.container():
         st.markdown('<div class="card">', unsafe_allow_html=True)
-        msg = st.text_input("说点什么吧~")
+
+        role = st.radio("选择AI助手类型", [
+            "💖 缓解情绪压力师",
+            "📚 资料查找大师",
+            "🧠 解题大师"
+        ], horizontal=True)
+
+        real_role = role.replace("💖 ", "").replace("📚 ", "").replace("🧠 ", "")
+
+        msg = st.text_input("请输入你想咨询/解答的内容~")
+
         if msg:
             if not api_key_input:
                 st.warning("请先在顶部输入你的 DeepSeek API Key")
             else:
-                st.info(emotion_support_chat(msg, api_key_input))
+                with st.spinner("AI正在思考解答中..."):
+                    reply = ai_chat(msg, api_key_input, real_role)
+                    st.info(reply)
+
         st.markdown('</div>', unsafe_allow_html=True)
 
 st.divider()
